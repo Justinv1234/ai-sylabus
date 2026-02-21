@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Download, Loader2, X, Plus } from "lucide-react";
+import { ArrowLeft, Download, Loader2, X, Plus, BookOpen, ChevronDown, ChevronRight } from "lucide-react";
 
 type GradingItem = { component: string; weight: string; description: string };
 type WeekItem = { week: number; topic: string; subtopics: string[]; assignments: string };
@@ -18,6 +18,13 @@ type Syllabus = {
   gradingBreakdown: GradingItem[];
   weeklySchedule: WeekItem[];
   policies: Policies;
+};
+
+type LessonPlan = {
+  objectives: string[];
+  materialsNeeded: string[];
+  lessonOutline: { activity: string; duration: string; description: string }[];
+  assessmentHomework: string;
 };
 
 // Shared class for inline editable inputs / textareas
@@ -35,6 +42,13 @@ function BuildContent() {
   const [data, setData] = useState<Syllabus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // Lesson plan state
+  const [lessonPlans, setLessonPlans] = useState<Record<number, LessonPlan>>({});
+  const [generatingWeek, setGeneratingWeek] = useState<number | null>(null);
+  const [expandedWeeks, setExpandedWeeks] = useState<Record<number, boolean>>({});
+  const [downloadingLessonWeek, setDownloadingLessonWeek] = useState<number | null>(null);
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
 
   useEffect(() => {
     fetch("/api/generate-syllabus", {
@@ -78,7 +92,38 @@ function BuildContent() {
     setData((d) => d ? { ...d, weeklySchedule: fn(d.weeklySchedule) } : d);
   }
 
-  // ── PDF download ──────────────────────────────────────────────────────────
+  // ── Lesson plan generation ─────────────────────────────────────────────
+
+  async function generateLessonPlan(week: WeekItem) {
+    if (!data || generatingWeek !== null) return;
+    setGeneratingWeek(week.week);
+    try {
+      const res = await fetch("/api/generate-lesson-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseTitle: data.courseTitle,
+          weekNumber: week.week,
+          topic: week.topic,
+          subtopics: week.subtopics,
+          assignments: week.assignments,
+          audience: params.get("audience") || "undergraduate",
+          teaching: params.get("teaching") || "mixed",
+        }),
+      });
+      const json = await res.json();
+      if (!json.error) {
+        setLessonPlans((prev) => ({ ...prev, [week.week]: json }));
+        setExpandedWeeks((prev) => ({ ...prev, [week.week]: true }));
+      }
+    } catch (e) {
+      console.error("Lesson plan generation failed:", e);
+    } finally {
+      setGeneratingWeek(null);
+    }
+  }
+
+  // ── PDF downloads ──────────────────────────────────────────────────────
 
   async function downloadPDF() {
     if (!data || isDownloading) return;
@@ -101,6 +146,79 @@ function BuildContent() {
       console.error("PDF generation failed:", e);
     } finally {
       setIsDownloading(false);
+    }
+  }
+
+  async function downloadLessonPlanPDF(weekNum: number) {
+    if (!data || downloadingLessonWeek !== null) return;
+    const plan = lessonPlans[weekNum];
+    if (!plan) return;
+    setDownloadingLessonWeek(weekNum);
+    try {
+      const weekItem = data.weeklySchedule.find((w) => w.week === weekNum);
+      const [{ pdf }, { LessonPlanPDF }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("@/components/LessonPlanPDF"),
+      ]);
+      const blob = await pdf(
+        <LessonPlanPDF
+          data={{
+            courseTitle: data.courseTitle,
+            weekNumber: weekNum,
+            topic: weekItem?.topic || "",
+            ...plan,
+          }}
+        />
+      ).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${data.courseTitle.replace(/[^a-z0-9\s]/gi, "").trim()} - Week ${weekNum} Lesson Plan.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Lesson plan PDF failed:", e);
+    } finally {
+      setDownloadingLessonWeek(null);
+    }
+  }
+
+  async function downloadAllLessonPlans() {
+    if (!data || isDownloadingAll) return;
+    setIsDownloadingAll(true);
+    try {
+      const [{ pdf }, { LessonPlanPDF }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("@/components/LessonPlanPDF"),
+      ]);
+      for (const weekNum of Object.keys(lessonPlans).map(Number).sort((a, b) => a - b)) {
+        const plan = lessonPlans[weekNum];
+        const weekItem = data.weeklySchedule.find((w) => w.week === weekNum);
+        const blob = await pdf(
+          <LessonPlanPDF
+            data={{
+              courseTitle: data.courseTitle,
+              weekNumber: weekNum,
+              topic: weekItem?.topic || "",
+              ...plan,
+            }}
+          />
+        ).toBlob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${data.courseTitle.replace(/[^a-z0-9\s]/gi, "").trim()} - Week ${weekNum} Lesson Plan.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.error("Download all lesson plans failed:", e);
+    } finally {
+      setIsDownloadingAll(false);
     }
   }
 
@@ -129,6 +247,8 @@ function BuildContent() {
     );
   }
 
+  const hasLessonPlans = Object.keys(lessonPlans).length > 0;
+
   return (
     <>
       {/* Toolbar */}
@@ -137,13 +257,24 @@ function BuildContent() {
           <ArrowLeft className="h-4 w-4" /> Back
         </Button>
         <p className="text-xs text-muted-foreground">Click any text to edit</p>
-        <Button size="sm" onClick={downloadPDF} disabled={isDownloading} className="gap-1.5">
-          {isDownloading ? (
-            <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
-          ) : (
-            <><Download className="h-4 w-4" /> Download PDF</>
+        <div className="flex items-center gap-2">
+          {hasLessonPlans && (
+            <Button size="sm" variant="outline" onClick={downloadAllLessonPlans} disabled={isDownloadingAll} className="gap-1.5">
+              {isDownloadingAll ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Downloading...</>
+              ) : (
+                <><BookOpen className="h-4 w-4" /> All Lesson Plans</>
+              )}
+            </Button>
           )}
-        </Button>
+          <Button size="sm" onClick={downloadPDF} disabled={isDownloading} className="gap-1.5">
+            {isDownloading ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
+            ) : (
+              <><Download className="h-4 w-4" /> Download PDF</>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Syllabus document */}
@@ -350,51 +481,154 @@ function BuildContent() {
               </tr>
             </thead>
             <tbody>
-              {data.weeklySchedule.map((row, i) => (
-                <tr key={i} className="group border-b border-border last:border-0 align-top">
-                  <td className="py-2 pr-3 text-muted-foreground">{row.week}</td>
-                  <td className="py-2 pr-3">
-                    <textarea
-                      value={row.topic}
-                      rows={1}
-                      onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], topic: e.target.value }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} font-medium resize-none overflow-hidden leading-normal`}
-                      placeholder="Topic"
-                    />
-                  </td>
-                  <td className="py-2">
-                    <textarea
-                      value={row.subtopics.join(", ")}
-                      rows={1}
-                      onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], subtopics: e.target.value.split(", ").filter(Boolean) }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} resize-none overflow-hidden leading-normal`}
-                      placeholder="Subtopics (comma-separated)..."
-                    />
-                    <textarea
-                      value={row.assignments}
-                      rows={1}
-                      onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], assignments: e.target.value }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} text-muted-foreground text-xs italic mt-0.5 resize-none overflow-hidden leading-normal`}
-                      placeholder="Assignments..."
-                    />
-                  </td>
-                  <td className="print:hidden py-2 pl-2 pt-3">
-                    <button
-                      onClick={() =>
-                        setSchedule((prev) =>
-                          prev.filter((_, idx) => idx !== i).map((w, idx) => ({ ...w, week: idx + 1 }))
-                        )
-                      }
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {data.weeklySchedule.map((row, i) => {
+                const plan = lessonPlans[row.week];
+                const isExpanded = expandedWeeks[row.week] ?? false;
+                const isGenerating = generatingWeek === row.week;
+
+                return (
+                  <tr key={i} className="group border-b border-border last:border-0 align-top">
+                    <td colSpan={4} className="p-0">
+                      {/* Week row */}
+                      <div className="flex items-start">
+                        <div className="py-2 pr-3 text-muted-foreground w-14 shrink-0">{row.week}</div>
+                        <div className="py-2 pr-3 w-1/3 shrink-0">
+                          <textarea
+                            value={row.topic}
+                            rows={1}
+                            onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], topic: e.target.value }; return a; }); autoResize(e); }}
+                            onFocus={autoResize}
+                            className={`${inputCls} font-medium resize-none overflow-hidden leading-normal`}
+                            placeholder="Topic"
+                          />
+                        </div>
+                        <div className="py-2 flex-1 min-w-0">
+                          <textarea
+                            value={row.subtopics.join(", ")}
+                            rows={1}
+                            onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], subtopics: e.target.value.split(", ").filter(Boolean) }; return a; }); autoResize(e); }}
+                            onFocus={autoResize}
+                            className={`${inputCls} resize-none overflow-hidden leading-normal`}
+                            placeholder="Subtopics (comma-separated)..."
+                          />
+                          <textarea
+                            value={row.assignments}
+                            rows={1}
+                            onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], assignments: e.target.value }; return a; }); autoResize(e); }}
+                            onFocus={autoResize}
+                            className={`${inputCls} text-muted-foreground text-xs italic mt-0.5 resize-none overflow-hidden leading-normal`}
+                            placeholder="Assignments..."
+                          />
+                          {/* Lesson plan button */}
+                          <div className="print:hidden mt-1.5 flex items-center gap-2">
+                            {!plan && (
+                              <button
+                                onClick={() => generateLessonPlan(row)}
+                                disabled={generatingWeek !== null}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                              >
+                                {isGenerating ? (
+                                  <><Loader2 className="h-3 w-3 animate-spin" /> Generating lesson plan...</>
+                                ) : (
+                                  <><BookOpen className="h-3 w-3" /> Generate Lesson Plan</>
+                                )}
+                              </button>
+                            )}
+                            {plan && (
+                              <>
+                                <button
+                                  onClick={() => setExpandedWeeks((prev) => ({ ...prev, [row.week]: !isExpanded }))}
+                                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                  {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                  Lesson Plan
+                                </button>
+                                <button
+                                  onClick={() => downloadLessonPlanPDF(row.week)}
+                                  disabled={downloadingLessonWeek !== null}
+                                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                                >
+                                  {downloadingLessonWeek === row.week ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Download className="h-3 w-3" />
+                                  )}
+                                  PDF
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="print:hidden py-2 pl-2 pt-3 w-6 shrink-0">
+                          <button
+                            onClick={() =>
+                              setSchedule((prev) =>
+                                prev.filter((_, idx) => idx !== i).map((w, idx) => ({ ...w, week: idx + 1 }))
+                              )
+                            }
+                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Expanded lesson plan detail */}
+                      {plan && isExpanded && (
+                        <div className="ml-14 mr-6 mb-3 mt-1 p-4 rounded-lg bg-muted/50 border border-border space-y-3 text-sm">
+                          <div>
+                            <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Objectives</p>
+                            <ul className="space-y-0.5">
+                              {plan.objectives.map((obj, j) => (
+                                <li key={j} className="flex gap-1.5 text-muted-foreground">
+                                  <span className="shrink-0">•</span>
+                                  <span>{obj}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Materials Needed</p>
+                            <ul className="space-y-0.5">
+                              {plan.materialsNeeded.map((m, j) => (
+                                <li key={j} className="flex gap-1.5 text-muted-foreground">
+                                  <span className="shrink-0">•</span>
+                                  <span>{m}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Lesson Outline</p>
+                            <table className="w-full text-xs border-collapse">
+                              <thead>
+                                <tr className="border-b border-border">
+                                  <th className="text-left pb-1 pr-2 font-medium text-muted-foreground">Activity</th>
+                                  <th className="text-left pb-1 pr-2 font-medium text-muted-foreground w-20">Duration</th>
+                                  <th className="text-left pb-1 font-medium text-muted-foreground">Description</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {plan.lessonOutline.map((step, j) => (
+                                  <tr key={j} className="border-b border-border/50 last:border-0">
+                                    <td className="py-1 pr-2 font-medium text-foreground">{step.activity}</td>
+                                    <td className="py-1 pr-2 text-muted-foreground">{step.duration}</td>
+                                    <td className="py-1 text-muted-foreground">{step.description}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Assessment & Homework</p>
+                            <p className="text-muted-foreground">{plan.assessmentHomework}</p>
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <button
