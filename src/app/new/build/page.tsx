@@ -6,8 +6,8 @@ import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import ChatPanel from "@/components/ChatPanel";
 import { syllabusToMarkdown, markdownToSyllabus } from "@/lib/syllabus-markdown";
-import type { Syllabus } from "@/lib/syllabus-markdown";
-import { ArrowLeft, Download, Loader2, BookOpen, MessageSquare } from "lucide-react";
+import type { Syllabus, Policies } from "@/lib/syllabus-markdown";
+import { ArrowLeft, Download, Loader2, BookOpen, MessageSquare, Eye, Pencil } from "lucide-react";
 import type { MDXEditorMethods } from "@mdxeditor/editor";
 
 // Dynamic import — MDXEditor uses browser APIs, can't SSR
@@ -37,14 +37,12 @@ function BuildContent() {
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [mode, setMode] = useState<"preview" | "edit">("preview");
 
   // Lesson plan state (kept separate from markdown)
   const [lessonPlans, setLessonPlans] = useState<Record<number, LessonPlan>>({});
   const [generatingWeek, setGeneratingWeek] = useState<number | null>(null);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
-
-  // Keep a ref to the original syllabus JSON for lesson plan generation context
-  const syllabusJsonRef = useRef<Syllabus | null>(null);
 
   useEffect(() => {
     fetch("/api/generate-syllabus", {
@@ -68,7 +66,6 @@ function BuildContent() {
           setError(json.error);
         } else {
           document.title = json.courseTitle || "Course Syllabus";
-          syllabusJsonRef.current = json;
           setMarkdown(syllabusToMarkdown(json));
         }
       })
@@ -82,7 +79,6 @@ function BuildContent() {
   }
 
   // ── Lesson plan generation ─────────────────────────────────────────────────
-  // Uses markdownToSyllabus to get current schedule for context
 
   async function generateLessonPlan(weekNum: number) {
     if (!markdown || generatingWeek !== null) return;
@@ -240,7 +236,6 @@ function BuildContent() {
     );
   }
 
-  // Parse current markdown for lesson plan toolbar buttons
   const currentSyllabus = markdownToSyllabus(markdown);
   const hasLessonPlans = Object.keys(lessonPlans).length > 0;
 
@@ -251,8 +246,34 @@ function BuildContent() {
         <Button variant="ghost" size="sm" onClick={() => router.back()} className="gap-1.5 text-muted-foreground">
           <ArrowLeft className="h-4 w-4" /> Back
         </Button>
+
+        {/* Mode toggle */}
+        <div className="flex items-center bg-muted rounded-lg p-0.5">
+          <button
+            onClick={() => setMode("preview")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              mode === "preview"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            Preview
+          </button>
+          <button
+            onClick={() => setMode("edit")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              mode === "edit"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
+          </button>
+        </div>
+
         <div className="flex items-center gap-2">
-          {/* Lesson plan generation dropdown */}
           {currentSyllabus.weeklySchedule.length > 0 && (
             <LessonPlanMenu
               weeks={currentSyllabus.weeklySchedule}
@@ -290,17 +311,21 @@ function BuildContent() {
         </div>
       </div>
 
-      {/* Main content: editor + chat panel */}
+      {/* Main content */}
       <div className="flex flex-1 min-h-0">
-        {/* Editor panel */}
+        {/* Editor / Preview panel */}
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-3xl mx-auto py-6">
-            <MarkdownEditor
-              ref={editorRef}
-              markdown={markdown}
-              onChange={setMarkdown}
-            />
-          </div>
+          {mode === "edit" ? (
+            <div className="max-w-3xl mx-auto py-6">
+              <MarkdownEditor
+                ref={editorRef}
+                markdown={markdown}
+                onChange={setMarkdown}
+              />
+            </div>
+          ) : (
+            <SyllabusPreview data={currentSyllabus} />
+          )}
         </div>
 
         {/* Chat panel */}
@@ -311,6 +336,141 @@ function BuildContent() {
           onClose={() => setChatOpen(false)}
         />
       </div>
+    </div>
+  );
+}
+
+// ── Styled Preview (original layout) ──────────────────────────────────────────
+
+function SyllabusPreview({ data }: { data: Syllabus }) {
+  return (
+    <div className="max-w-3xl mx-auto px-8 py-12 space-y-8">
+      {/* Header */}
+      <div className="text-center space-y-1 pb-6 border-b-2 border-foreground">
+        <h1 className="text-3xl font-bold text-foreground">{data.courseTitle}</h1>
+        {data.courseCode && (
+          <p className="text-muted-foreground">{data.courseCode}</p>
+        )}
+      </div>
+
+      {/* Course Description */}
+      <Section title="Course Description">
+        <p className="text-sm leading-relaxed whitespace-pre-wrap">{data.courseDescription}</p>
+      </Section>
+
+      {/* Prerequisites */}
+      {data.prerequisites && (
+        <Section title="Prerequisites">
+          <p className="text-sm">{data.prerequisites}</p>
+        </Section>
+      )}
+
+      {/* Learning Objectives */}
+      <Section title="Learning Objectives">
+        <p className="text-sm text-muted-foreground mb-2">By the end of this course, students will be able to:</p>
+        <ul className="space-y-1.5">
+          {data.learningObjectives.map((obj, i) => (
+            <li key={i} className="flex gap-2 items-start">
+              <span className="text-muted-foreground shrink-0 text-sm mt-0.5">&bull;</span>
+              <span className="text-sm">{obj}</span>
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      {/* Required Materials */}
+      {data.requiredMaterials.length > 0 && (
+        <Section title="Required Materials">
+          <ul className="space-y-1.5">
+            {data.requiredMaterials.map((m, i) => (
+              <li key={i} className="flex gap-2 items-start">
+                <span className="text-muted-foreground shrink-0 text-sm mt-0.5">&bull;</span>
+                <span className="text-sm">{m}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {/* Grading Breakdown */}
+      <Section title="Grading Breakdown">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left pb-2 pr-4 font-medium text-muted-foreground w-1/4">Component</th>
+              <th className="text-left pb-2 pr-4 font-medium text-muted-foreground w-16">Weight</th>
+              <th className="text-left pb-2 font-medium text-muted-foreground">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.gradingBreakdown.map((row, i) => (
+              <tr key={i} className="border-b border-border last:border-0">
+                <td className="py-1.5 pr-4 font-medium">{row.component}</td>
+                <td className="py-1.5 pr-4">{row.weight}</td>
+                <td className="py-1.5 text-muted-foreground">{row.description}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      {/* Weekly Schedule */}
+      <Section title="Course Schedule">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left pb-2 pr-3 font-medium text-muted-foreground w-14">Week</th>
+              <th className="text-left pb-2 pr-3 font-medium text-muted-foreground w-1/3">Topic</th>
+              <th className="text-left pb-2 font-medium text-muted-foreground">Subtopics &amp; Assignments</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.weeklySchedule.map((row, i) => (
+              <tr key={i} className="border-b border-border last:border-0 align-top">
+                <td className="py-2 pr-3 text-muted-foreground">{row.week}</td>
+                <td className="py-2 pr-3 font-medium">{row.topic}</td>
+                <td className="py-2">
+                  {row.subtopics.length > 0 && (
+                    <span>{row.subtopics.join(", ")}</span>
+                  )}
+                  {row.assignments && (
+                    <p className="text-muted-foreground text-xs italic mt-0.5">{row.assignments}</p>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      {/* Policies */}
+      <Section title="Course Policies">
+        <div className="space-y-4">
+          {(
+            [
+              { label: "Attendance", key: "attendance" },
+              { label: "Late Work", key: "lateWork" },
+              { label: "Academic Integrity", key: "academicIntegrity" },
+            ] as { label: string; key: keyof Policies }[]
+          ).map(({ label, key }) => (
+            <div key={key}>
+              <p className="text-sm font-semibold text-foreground mb-1">{label}</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">{data.policies[key]}</p>
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-base font-bold text-foreground uppercase tracking-wide border-b border-border pb-1">
+        {title}
+      </h2>
+      {children}
     </div>
   );
 }
