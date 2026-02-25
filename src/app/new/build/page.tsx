@@ -33,7 +33,6 @@ function BuildContent() {
   const [lessonPlans, setLessonPlans] = useState<Record<number, LessonPlan>>({});
   const [generatingWeek, setGeneratingWeek] = useState<number | null>(null);
   const [expandedWeeks, setExpandedWeeks] = useState<Record<number, boolean>>({});
-  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [downloadingLessonWeek, setDownloadingLessonWeek] = useState<number | null>(null);
 
   useEffect(() => {
@@ -167,43 +166,6 @@ function BuildContent() {
     }
   }
 
-  async function downloadAllLessonPlans() {
-    if (!markdown || isDownloadingAll) return;
-    setIsDownloadingAll(true);
-    try {
-      const syllabus = markdownToSyllabus(markdown);
-      const [{ pdf }, { LessonPlanPDF }] = await Promise.all([
-        import("@react-pdf/renderer"),
-        import("@/components/LessonPlanPDF"),
-      ]);
-      for (const weekNum of Object.keys(lessonPlans).map(Number).sort((a, b) => a - b)) {
-        const plan = lessonPlans[weekNum];
-        const weekItem = syllabus.weeklySchedule.find((w) => w.week === weekNum);
-        const blob = await pdf(
-          <LessonPlanPDF
-            data={{
-              courseTitle: syllabus.courseTitle,
-              weekNumber: weekNum,
-              topic: weekItem?.topic || "",
-              ...plan,
-            }}
-          />
-        ).toBlob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${syllabus.courseTitle.replace(/[^a-z0-9\s]/gi, "").trim()} - Week ${weekNum} Lesson Plan.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-    } catch (e) {
-      console.error("Download all lesson plans failed:", e);
-    } finally {
-      setIsDownloadingAll(false);
-    }
-  }
 
   // ── Render states ──────────────────────────────────────────────────────────
 
@@ -232,6 +194,17 @@ function BuildContent() {
 
   const currentSyllabus = markdownToSyllabus(markdown);
   const hasLessonPlans = Object.keys(lessonPlans).length > 0;
+  const allExpanded = hasLessonPlans &&
+    Object.keys(lessonPlans).every((k) => expandedWeeks[Number(k)]);
+
+  function toggleAllLessonPlans() {
+    const newState = !allExpanded;
+    const updated: Record<number, boolean> = {};
+    for (const k of Object.keys(lessonPlans)) {
+      updated[Number(k)] = newState;
+    }
+    setExpandedWeeks((prev) => ({ ...prev, ...updated }));
+  }
 
   return (
     <div className="h-screen flex flex-col">
@@ -269,12 +242,9 @@ function BuildContent() {
 
         <div className="flex items-center gap-2">
           {hasLessonPlans && (
-            <Button size="sm" variant="outline" onClick={downloadAllLessonPlans} disabled={isDownloadingAll} className="gap-1.5">
-              {isDownloadingAll ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Downloading...</>
-              ) : (
-                <><BookOpen className="h-4 w-4" /> All Lesson Plans</>
-              )}
+            <Button size="sm" variant="outline" onClick={toggleAllLessonPlans} className="gap-1.5">
+              <BookOpen className="h-4 w-4" />
+              {allExpanded ? "Hide All Lesson Plans" : "All Lesson Plans"}
             </Button>
           )}
           <Button size="sm" onClick={downloadPDF} disabled={isDownloading} className="gap-1.5">

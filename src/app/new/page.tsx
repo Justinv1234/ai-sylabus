@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Paperclip, X, SkipForward } from "lucide-react";
+import { ArrowLeft, ArrowRight, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const AUDIENCE_OPTIONS = [
@@ -121,9 +121,8 @@ export default function NewCoursePage() {
     return (
       <button
         onClick={advance}
-        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mt-4"
+        className="text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
-        <SkipForward className="h-3.5 w-3.5" />
         Skip
       </button>
     );
