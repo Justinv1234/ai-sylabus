@@ -4,19 +4,15 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import ChatPanel from "@/components/ChatPanel";
-import { syllabusToMarkdown, markdownToSyllabus } from "@/lib/syllabus-markdown";
-import type { Syllabus, Policies } from "@/lib/syllabus-markdown";
+import {
+  syllabusToMarkdown, markdownToSyllabus,
+  lessonPlanToMarkdown, markdownToLessonPlan,
+} from "@/lib/syllabus-markdown";
+import type { Syllabus, Policies, LessonPlan } from "@/lib/syllabus-markdown";
 import {
   ArrowLeft, Download, Loader2, BookOpen, MessageSquare,
   Eye, Pencil, ChevronDown, ChevronRight,
 } from "lucide-react";
-
-type LessonPlan = {
-  objectives: string[];
-  materialsNeeded: string[];
-  lessonOutline: { activity: string; duration: string; description: string }[];
-  assessmentHomework: string;
-};
 
 function BuildContent() {
   const params = useSearchParams();
@@ -29,8 +25,8 @@ function BuildContent() {
   const [chatOpen, setChatOpen] = useState(false);
   const [mode, setMode] = useState<"preview" | "edit">("preview");
 
-  // Lesson plan state
-  const [lessonPlans, setLessonPlans] = useState<Record<number, LessonPlan>>({});
+  // Lesson plans as separate markdown strings, keyed by week number
+  const [lessonPlanMds, setLessonPlanMds] = useState<Record<number, string>>({});
   const [generatingWeek, setGeneratingWeek] = useState<number | null>(null);
   const [expandedWeeks, setExpandedWeeks] = useState<Record<number, boolean>>({});
   const [downloadingLessonWeek, setDownloadingLessonWeek] = useState<number | null>(null);
@@ -63,8 +59,40 @@ function BuildContent() {
       .catch(() => setError("Something went wrong. Please try again."));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Build combined context for the AI chat: syllabus + all lesson plans
+  function getChatContext(): string {
+    if (!markdown) return "";
+    let ctx = markdown;
+    const weeks = Object.keys(lessonPlanMds).map(Number).sort((a, b) => a - b);
+    if (weeks.length > 0) {
+      ctx += "\n\n---\n\n";
+      for (const w of weeks) {
+        ctx += lessonPlanMds[w] + "\n\n---\n\n";
+      }
+    }
+    return ctx;
+  }
+
+  // When AI updates, it might update both syllabus and lesson plans
   function handleChatMarkdownUpdate(newMd: string) {
-    setMarkdown(newMd);
+    // Split on --- separators: first chunk is syllabus, rest are lesson plans
+    const chunks = newMd.split(/\n---\n/).map((c) => c.trim()).filter(Boolean);
+
+    // First chunk is always the syllabus
+    setMarkdown(chunks[0]);
+
+    // Remaining chunks are lesson plans — detect week number from heading
+    const newPlans: Record<number, string> = {};
+    for (let i = 1; i < chunks.length; i++) {
+      const weekMatch = chunks[i].match(/^#\s+Week\s+(\d+)/m);
+      if (weekMatch) {
+        newPlans[parseInt(weekMatch[1])] = chunks[i];
+      }
+    }
+    // Merge: keep existing plans, overwrite any the AI updated
+    if (Object.keys(newPlans).length > 0) {
+      setLessonPlanMds((prev) => ({ ...prev, ...newPlans }));
+    }
   }
 
   // ── Lesson plan generation ─────────────────────────────────────────────────
@@ -92,7 +120,8 @@ function BuildContent() {
       });
       const json = await res.json();
       if (!json.error) {
-        setLessonPlans((prev) => ({ ...prev, [weekNum]: json }));
+        const planMd = lessonPlanToMarkdown(json, weekNum, week.topic, syllabus.courseTitle);
+        setLessonPlanMds((prev) => ({ ...prev, [weekNum]: planMd }));
         setExpandedWeeks((prev) => ({ ...prev, [weekNum]: true }));
       }
     } catch (e) {
@@ -131,12 +160,13 @@ function BuildContent() {
 
   async function downloadLessonPlanPDF(weekNum: number) {
     if (!markdown || downloadingLessonWeek !== null) return;
-    const plan = lessonPlans[weekNum];
-    if (!plan) return;
+    const planMd = lessonPlanMds[weekNum];
+    if (!planMd) return;
     setDownloadingLessonWeek(weekNum);
     try {
       const syllabus = markdownToSyllabus(markdown);
       const weekItem = syllabus.weeklySchedule.find((w) => w.week === weekNum);
+      const plan = markdownToLessonPlan(planMd);
       const [{ pdf }, { LessonPlanPDF }] = await Promise.all([
         import("@react-pdf/renderer"),
         import("@/components/LessonPlanPDF"),
@@ -166,7 +196,6 @@ function BuildContent() {
     }
   }
 
-
   // ── Render states ──────────────────────────────────────────────────────────
 
   if (error) {
@@ -193,18 +222,21 @@ function BuildContent() {
   }
 
   const currentSyllabus = markdownToSyllabus(markdown);
-  const hasLessonPlans = Object.keys(lessonPlans).length > 0;
+  const hasLessonPlans = Object.keys(lessonPlanMds).length > 0;
   const allExpanded = hasLessonPlans &&
-    Object.keys(lessonPlans).every((k) => expandedWeeks[Number(k)]);
+    Object.keys(lessonPlanMds).every((k) => expandedWeeks[Number(k)]);
 
   function toggleAllLessonPlans() {
     const newState = !allExpanded;
     const updated: Record<number, boolean> = {};
-    for (const k of Object.keys(lessonPlans)) {
+    for (const k of Object.keys(lessonPlanMds)) {
       updated[Number(k)] = newState;
     }
     setExpandedWeeks((prev) => ({ ...prev, ...updated }));
   }
+
+  // Sort lesson plan week numbers for edit mode
+  const lessonWeeks = Object.keys(lessonPlanMds).map(Number).sort((a, b) => a - b);
 
   return (
     <div className="h-screen flex flex-col">
@@ -268,21 +300,46 @@ function BuildContent() {
 
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
-        {/* Editor / Preview panel */}
         <div className="flex-1 overflow-y-auto">
           {mode === "edit" ? (
-            <div className="max-w-4xl mx-auto py-6 px-6">
-              <textarea
-                value={markdown}
-                onChange={(e) => setMarkdown(e.target.value)}
-                spellCheck={false}
-                className="w-full h-[calc(100vh-8rem)] font-mono text-sm leading-relaxed bg-background text-foreground border border-border rounded-lg p-4 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-              />
+            <div className="max-w-4xl mx-auto py-6 px-6 space-y-6">
+              {/* Syllabus markdown */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Syllabus</p>
+                <textarea
+                  value={markdown}
+                  onChange={(e) => setMarkdown(e.target.value)}
+                  spellCheck={false}
+                  className="w-full font-mono text-sm leading-relaxed bg-background text-foreground border border-border rounded-lg p-4 resize-vertical focus:outline-none focus:ring-1 focus:ring-ring"
+                  style={{ minHeight: "60vh" }}
+                />
+              </div>
+
+              {/* Each lesson plan as its own markdown editor */}
+              {lessonWeeks.map((weekNum) => {
+                const weekItem = currentSyllabus.weeklySchedule.find((w) => w.week === weekNum);
+                return (
+                  <div key={weekNum}>
+                    <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">
+                      Week {weekNum} Lesson Plan — {weekItem?.topic || ""}
+                    </p>
+                    <textarea
+                      value={lessonPlanMds[weekNum]}
+                      onChange={(e) =>
+                        setLessonPlanMds((prev) => ({ ...prev, [weekNum]: e.target.value }))
+                      }
+                      spellCheck={false}
+                      className="w-full font-mono text-sm leading-relaxed bg-background text-foreground border border-border rounded-lg p-4 resize-vertical focus:outline-none focus:ring-1 focus:ring-ring"
+                      style={{ minHeight: "30vh" }}
+                    />
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <SyllabusPreview
               data={currentSyllabus}
-              lessonPlans={lessonPlans}
+              lessonPlanMds={lessonPlanMds}
               expandedWeeks={expandedWeeks}
               generatingWeek={generatingWeek}
               downloadingLessonWeek={downloadingLessonWeek}
@@ -297,7 +354,7 @@ function BuildContent() {
 
         {/* Chat panel */}
         <ChatPanel
-          markdown={markdown}
+          markdown={getChatContext()}
           onMarkdownUpdate={handleChatMarkdownUpdate}
           isOpen={chatOpen}
           onClose={() => setChatOpen(false)}
@@ -311,7 +368,7 @@ function BuildContent() {
 
 function SyllabusPreview({
   data,
-  lessonPlans,
+  lessonPlanMds,
   expandedWeeks,
   generatingWeek,
   downloadingLessonWeek,
@@ -320,7 +377,7 @@ function SyllabusPreview({
   onDownloadLessonPlan,
 }: {
   data: Syllabus;
-  lessonPlans: Record<number, LessonPlan>;
+  lessonPlanMds: Record<number, string>;
   expandedWeeks: Record<number, boolean>;
   generatingWeek: number | null;
   downloadingLessonWeek: number | null;
@@ -411,7 +468,8 @@ function SyllabusPreview({
           </thead>
           <tbody>
             {data.weeklySchedule.map((row, i) => {
-              const plan = lessonPlans[row.week];
+              const planMd = lessonPlanMds[row.week];
+              const plan = planMd ? markdownToLessonPlan(planMd) : null;
               const isExpanded = expandedWeeks[row.week] ?? false;
               const isGenerating = generatingWeek === row.week;
 
@@ -472,55 +530,7 @@ function SyllabusPreview({
 
                     {/* Expanded lesson plan detail */}
                     {plan && isExpanded && (
-                      <div className="ml-14 mr-6 mb-3 mt-1 p-4 rounded-lg bg-muted/50 border border-border space-y-3 text-sm">
-                        <div>
-                          <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Objectives</p>
-                          <ul className="space-y-0.5">
-                            {plan.objectives.map((obj, j) => (
-                              <li key={j} className="flex gap-1.5 text-muted-foreground">
-                                <span className="shrink-0">&bull;</span>
-                                <span>{obj}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Materials Needed</p>
-                          <ul className="space-y-0.5">
-                            {plan.materialsNeeded.map((m, j) => (
-                              <li key={j} className="flex gap-1.5 text-muted-foreground">
-                                <span className="shrink-0">&bull;</span>
-                                <span>{m}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Lesson Outline</p>
-                          <table className="w-full text-xs border-collapse">
-                            <thead>
-                              <tr className="border-b border-border">
-                                <th className="text-left pb-1 pr-2 font-medium text-muted-foreground">Activity</th>
-                                <th className="text-left pb-1 pr-2 font-medium text-muted-foreground w-20">Duration</th>
-                                <th className="text-left pb-1 font-medium text-muted-foreground">Description</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {plan.lessonOutline.map((step, j) => (
-                                <tr key={j} className="border-b border-border/50 last:border-0">
-                                  <td className="py-1 pr-2 font-medium text-foreground">{step.activity}</td>
-                                  <td className="py-1 pr-2 text-muted-foreground">{step.duration}</td>
-                                  <td className="py-1 text-muted-foreground">{step.description}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Assessment &amp; Homework</p>
-                          <p className="text-muted-foreground">{plan.assessmentHomework}</p>
-                        </div>
-                      </div>
+                      <LessonPlanDetail plan={plan} />
                     )}
                   </td>
                 </tr>
@@ -547,6 +557,60 @@ function SyllabusPreview({
           ))}
         </div>
       </Section>
+    </div>
+  );
+}
+
+function LessonPlanDetail({ plan }: { plan: LessonPlan }) {
+  return (
+    <div className="ml-14 mr-6 mb-3 mt-1 p-4 rounded-lg bg-muted/50 border border-border space-y-3 text-sm">
+      <div>
+        <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Objectives</p>
+        <ul className="space-y-0.5">
+          {plan.objectives.map((obj, j) => (
+            <li key={j} className="flex gap-1.5 text-muted-foreground">
+              <span className="shrink-0">&bull;</span>
+              <span>{obj}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div>
+        <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Materials Needed</p>
+        <ul className="space-y-0.5">
+          {plan.materialsNeeded.map((m, j) => (
+            <li key={j} className="flex gap-1.5 text-muted-foreground">
+              <span className="shrink-0">&bull;</span>
+              <span>{m}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div>
+        <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Lesson Outline</p>
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left pb-1 pr-2 font-medium text-muted-foreground">Activity</th>
+              <th className="text-left pb-1 pr-2 font-medium text-muted-foreground w-20">Duration</th>
+              <th className="text-left pb-1 font-medium text-muted-foreground">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {plan.lessonOutline.map((step, j) => (
+              <tr key={j} className="border-b border-border/50 last:border-0">
+                <td className="py-1 pr-2 font-medium text-foreground">{step.activity}</td>
+                <td className="py-1 pr-2 text-muted-foreground">{step.duration}</td>
+                <td className="py-1 text-muted-foreground">{step.description}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Assessment &amp; Homework</p>
+        <p className="text-muted-foreground">{plan.assessmentHomework}</p>
+      </div>
     </div>
   );
 }

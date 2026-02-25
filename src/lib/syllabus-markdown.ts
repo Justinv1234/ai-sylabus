@@ -247,3 +247,71 @@ function splitSubSections(section: string): Record<string, string> {
   }
   return result;
 }
+
+// ── Lesson Plan types & conversion ────────────────────────────────────────────
+
+export type LessonPlan = {
+  objectives: string[];
+  materialsNeeded: string[];
+  lessonOutline: { activity: string; duration: string; description: string }[];
+  assessmentHomework: string;
+};
+
+export function lessonPlanToMarkdown(
+  plan: LessonPlan,
+  weekNum: number,
+  topic: string,
+  courseTitle: string,
+): string {
+  const lines: string[] = [];
+
+  lines.push(`# Week ${weekNum} Lesson Plan`);
+  lines.push(`*${courseTitle} — ${topic}*`);
+  lines.push("");
+
+  lines.push("## Objectives");
+  for (const obj of plan.objectives) {
+    lines.push(`- ${obj}`);
+  }
+  lines.push("");
+
+  lines.push("## Materials Needed");
+  for (const m of plan.materialsNeeded) {
+    lines.push(`- ${m}`);
+  }
+  lines.push("");
+
+  lines.push("## Lesson Outline");
+  lines.push("| Activity | Duration | Description |");
+  lines.push("| --- | --- | --- |");
+  for (const step of plan.lessonOutline) {
+    lines.push(`| ${esc(step.activity)} | ${esc(step.duration)} | ${esc(step.description)} |`);
+  }
+  lines.push("");
+
+  lines.push("## Assessment & Homework");
+  lines.push(plan.assessmentHomework);
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+export function markdownToLessonPlan(md: string): LessonPlan {
+  const sections = splitSections(md);
+
+  const objectives = extractBullets(sections["objectives"] || "");
+  const materialsNeeded = extractBullets(sections["materials needed"] || "");
+
+  const outlineRows = extractTableRows(sections["lesson outline"] || "");
+  const lessonOutline = outlineRows.map((cols) => ({
+    activity: cols[0] || "",
+    duration: cols[1] || "",
+    description: cols[2] || "",
+  }));
+
+  const assessmentHomework = getBodyText(
+    sections["assessment & homework"] || sections["assessment and homework"] || ""
+  );
+
+  return { objectives, materialsNeeded, lessonOutline, assessmentHomework };
+}
