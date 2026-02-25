@@ -1,24 +1,15 @@
 "use client";
 
-import { useEffect, useState, useRef, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import ChatPanel from "@/components/ChatPanel";
 import { syllabusToMarkdown, markdownToSyllabus } from "@/lib/syllabus-markdown";
 import type { Syllabus, Policies } from "@/lib/syllabus-markdown";
-import { ArrowLeft, Download, Loader2, BookOpen, MessageSquare, Eye, Pencil } from "lucide-react";
-import type { MDXEditorMethods } from "@mdxeditor/editor";
-
-// Dynamic import — MDXEditor uses browser APIs, can't SSR
-const MarkdownEditor = dynamic(() => import("@/components/MarkdownEditor"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center py-20">
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-    </div>
-  ),
-});
+import {
+  ArrowLeft, Download, Loader2, BookOpen, MessageSquare,
+  Eye, Pencil, ChevronDown, ChevronRight,
+} from "lucide-react";
 
 type LessonPlan = {
   objectives: string[];
@@ -30,7 +21,6 @@ type LessonPlan = {
 function BuildContent() {
   const params = useSearchParams();
   const router = useRouter();
-  const editorRef = useRef<MDXEditorMethods>(null);
 
   // Markdown is the source of truth
   const [markdown, setMarkdown] = useState<string | null>(null);
@@ -39,10 +29,12 @@ function BuildContent() {
   const [chatOpen, setChatOpen] = useState(false);
   const [mode, setMode] = useState<"preview" | "edit">("preview");
 
-  // Lesson plan state (kept separate from markdown)
+  // Lesson plan state
   const [lessonPlans, setLessonPlans] = useState<Record<number, LessonPlan>>({});
   const [generatingWeek, setGeneratingWeek] = useState<number | null>(null);
+  const [expandedWeeks, setExpandedWeeks] = useState<Record<number, boolean>>({});
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const [downloadingLessonWeek, setDownloadingLessonWeek] = useState<number | null>(null);
 
   useEffect(() => {
     fetch("/api/generate-syllabus", {
@@ -72,10 +64,8 @@ function BuildContent() {
       .catch(() => setError("Something went wrong. Please try again."));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When the AI chatbot updates markdown, push it into the editor
   function handleChatMarkdownUpdate(newMd: string) {
     setMarkdown(newMd);
-    editorRef.current?.setMarkdown(newMd);
   }
 
   // ── Lesson plan generation ─────────────────────────────────────────────────
@@ -104,6 +94,7 @@ function BuildContent() {
       const json = await res.json();
       if (!json.error) {
         setLessonPlans((prev) => ({ ...prev, [weekNum]: json }));
+        setExpandedWeeks((prev) => ({ ...prev, [weekNum]: true }));
       }
     } catch (e) {
       console.error("Lesson plan generation failed:", e);
@@ -140,9 +131,10 @@ function BuildContent() {
   }
 
   async function downloadLessonPlanPDF(weekNum: number) {
-    if (!markdown) return;
+    if (!markdown || downloadingLessonWeek !== null) return;
     const plan = lessonPlans[weekNum];
     if (!plan) return;
+    setDownloadingLessonWeek(weekNum);
     try {
       const syllabus = markdownToSyllabus(markdown);
       const weekItem = syllabus.weeklySchedule.find((w) => w.week === weekNum);
@@ -170,6 +162,8 @@ function BuildContent() {
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error("Lesson plan PDF failed:", e);
+    } finally {
+      setDownloadingLessonWeek(null);
     }
   }
 
@@ -274,15 +268,6 @@ function BuildContent() {
         </div>
 
         <div className="flex items-center gap-2">
-          {currentSyllabus.weeklySchedule.length > 0 && (
-            <LessonPlanMenu
-              weeks={currentSyllabus.weeklySchedule}
-              lessonPlans={lessonPlans}
-              generatingWeek={generatingWeek}
-              onGenerate={generateLessonPlan}
-              onDownload={downloadLessonPlanPDF}
-            />
-          )}
           {hasLessonPlans && (
             <Button size="sm" variant="outline" onClick={downloadAllLessonPlans} disabled={isDownloadingAll} className="gap-1.5">
               {isDownloadingAll ? (
@@ -316,15 +301,27 @@ function BuildContent() {
         {/* Editor / Preview panel */}
         <div className="flex-1 overflow-y-auto">
           {mode === "edit" ? (
-            <div className="max-w-3xl mx-auto py-6">
-              <MarkdownEditor
-                ref={editorRef}
-                markdown={markdown}
-                onChange={setMarkdown}
+            <div className="max-w-4xl mx-auto py-6 px-6">
+              <textarea
+                value={markdown}
+                onChange={(e) => setMarkdown(e.target.value)}
+                spellCheck={false}
+                className="w-full h-[calc(100vh-8rem)] font-mono text-sm leading-relaxed bg-background text-foreground border border-border rounded-lg p-4 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
           ) : (
-            <SyllabusPreview data={currentSyllabus} />
+            <SyllabusPreview
+              data={currentSyllabus}
+              lessonPlans={lessonPlans}
+              expandedWeeks={expandedWeeks}
+              generatingWeek={generatingWeek}
+              downloadingLessonWeek={downloadingLessonWeek}
+              onToggleWeek={(weekNum) =>
+                setExpandedWeeks((prev) => ({ ...prev, [weekNum]: !prev[weekNum] }))
+              }
+              onGenerateLessonPlan={generateLessonPlan}
+              onDownloadLessonPlan={downloadLessonPlanPDF}
+            />
           )}
         </div>
 
@@ -340,9 +337,27 @@ function BuildContent() {
   );
 }
 
-// ── Styled Preview (original layout) ──────────────────────────────────────────
+// ── Styled Preview with inline lesson plans ───────────────────────────────────
 
-function SyllabusPreview({ data }: { data: Syllabus }) {
+function SyllabusPreview({
+  data,
+  lessonPlans,
+  expandedWeeks,
+  generatingWeek,
+  downloadingLessonWeek,
+  onToggleWeek,
+  onGenerateLessonPlan,
+  onDownloadLessonPlan,
+}: {
+  data: Syllabus;
+  lessonPlans: Record<number, LessonPlan>;
+  expandedWeeks: Record<number, boolean>;
+  generatingWeek: number | null;
+  downloadingLessonWeek: number | null;
+  onToggleWeek: (weekNum: number) => void;
+  onGenerateLessonPlan: (weekNum: number) => void;
+  onDownloadLessonPlan: (weekNum: number) => void;
+}) {
   return (
     <div className="max-w-3xl mx-auto px-8 py-12 space-y-8">
       {/* Header */}
@@ -414,7 +429,7 @@ function SyllabusPreview({ data }: { data: Syllabus }) {
         </table>
       </Section>
 
-      {/* Weekly Schedule */}
+      {/* Weekly Schedule with inline lesson plans */}
       <Section title="Course Schedule">
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -425,20 +440,122 @@ function SyllabusPreview({ data }: { data: Syllabus }) {
             </tr>
           </thead>
           <tbody>
-            {data.weeklySchedule.map((row, i) => (
-              <tr key={i} className="border-b border-border last:border-0 align-top">
-                <td className="py-2 pr-3 text-muted-foreground">{row.week}</td>
-                <td className="py-2 pr-3 font-medium">{row.topic}</td>
-                <td className="py-2">
-                  {row.subtopics.length > 0 && (
-                    <span>{row.subtopics.join(", ")}</span>
-                  )}
-                  {row.assignments && (
-                    <p className="text-muted-foreground text-xs italic mt-0.5">{row.assignments}</p>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {data.weeklySchedule.map((row, i) => {
+              const plan = lessonPlans[row.week];
+              const isExpanded = expandedWeeks[row.week] ?? false;
+              const isGenerating = generatingWeek === row.week;
+
+              return (
+                <tr key={i} className="border-b border-border last:border-0 align-top">
+                  <td colSpan={3} className="p-0">
+                    <div className="flex items-start">
+                      <div className="py-2 pr-3 text-muted-foreground w-14 shrink-0">{row.week}</div>
+                      <div className="py-2 pr-3 w-1/3 shrink-0 font-medium">{row.topic}</div>
+                      <div className="py-2 flex-1 min-w-0">
+                        {row.subtopics.length > 0 && (
+                          <span>{row.subtopics.join(", ")}</span>
+                        )}
+                        {row.assignments && (
+                          <p className="text-muted-foreground text-xs italic mt-0.5">{row.assignments}</p>
+                        )}
+                        {/* Lesson plan controls */}
+                        <div className="print:hidden mt-1.5 flex items-center gap-2">
+                          {!plan && (
+                            <button
+                              onClick={() => onGenerateLessonPlan(row.week)}
+                              disabled={generatingWeek !== null}
+                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                            >
+                              {isGenerating ? (
+                                <><Loader2 className="h-3 w-3 animate-spin" /> Generating lesson plan...</>
+                              ) : (
+                                <><BookOpen className="h-3 w-3" /> Generate Lesson Plan</>
+                              )}
+                            </button>
+                          )}
+                          {plan && (
+                            <>
+                              <button
+                                onClick={() => onToggleWeek(row.week)}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                Lesson Plan
+                              </button>
+                              <button
+                                onClick={() => onDownloadLessonPlan(row.week)}
+                                disabled={downloadingLessonWeek !== null}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                              >
+                                {downloadingLessonWeek === row.week ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Download className="h-3 w-3" />
+                                )}
+                                PDF
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded lesson plan detail */}
+                    {plan && isExpanded && (
+                      <div className="ml-14 mr-6 mb-3 mt-1 p-4 rounded-lg bg-muted/50 border border-border space-y-3 text-sm">
+                        <div>
+                          <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Objectives</p>
+                          <ul className="space-y-0.5">
+                            {plan.objectives.map((obj, j) => (
+                              <li key={j} className="flex gap-1.5 text-muted-foreground">
+                                <span className="shrink-0">&bull;</span>
+                                <span>{obj}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Materials Needed</p>
+                          <ul className="space-y-0.5">
+                            {plan.materialsNeeded.map((m, j) => (
+                              <li key={j} className="flex gap-1.5 text-muted-foreground">
+                                <span className="shrink-0">&bull;</span>
+                                <span>{m}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Lesson Outline</p>
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-border">
+                                <th className="text-left pb-1 pr-2 font-medium text-muted-foreground">Activity</th>
+                                <th className="text-left pb-1 pr-2 font-medium text-muted-foreground w-20">Duration</th>
+                                <th className="text-left pb-1 font-medium text-muted-foreground">Description</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {plan.lessonOutline.map((step, j) => (
+                                <tr key={j} className="border-b border-border/50 last:border-0">
+                                  <td className="py-1 pr-2 font-medium text-foreground">{step.activity}</td>
+                                  <td className="py-1 pr-2 text-muted-foreground">{step.duration}</td>
+                                  <td className="py-1 text-muted-foreground">{step.description}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-1">Assessment &amp; Homework</p>
+                          <p className="text-muted-foreground">{plan.assessmentHomework}</p>
+                        </div>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Section>
@@ -471,74 +588,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
         {title}
       </h2>
       {children}
-    </div>
-  );
-}
-
-// ── Lesson Plan Dropdown ───────────────────────────────────────────────────────
-
-function LessonPlanMenu({
-  weeks,
-  lessonPlans,
-  generatingWeek,
-  onGenerate,
-  onDownload,
-}: {
-  weeks: { week: number; topic: string }[];
-  lessonPlans: Record<number, LessonPlan>;
-  generatingWeek: number | null;
-  onGenerate: (weekNum: number) => void;
-  onDownload: (weekNum: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="relative">
-      <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} className="gap-1.5">
-        <BookOpen className="h-4 w-4" />
-        Lesson Plans
-      </Button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-30 w-72 bg-popover border border-border rounded-lg shadow-lg max-h-80 overflow-y-auto">
-            {weeks.map((w) => {
-              const hasPlan = !!lessonPlans[w.week];
-              const isGenerating = generatingWeek === w.week;
-              return (
-                <div
-                  key={w.week}
-                  className="flex items-center justify-between px-3 py-2 text-sm border-b border-border last:border-0 hover:bg-muted/50"
-                >
-                  <span className="truncate mr-2">
-                    <span className="text-muted-foreground">W{w.week}:</span> {w.topic || "—"}
-                  </span>
-                  {hasPlan ? (
-                    <button
-                      onClick={() => { onDownload(w.week); setOpen(false); }}
-                      className="text-xs text-muted-foreground hover:text-foreground shrink-0 flex items-center gap-1"
-                    >
-                      <Download className="h-3 w-3" /> PDF
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => onGenerate(w.week)}
-                      disabled={generatingWeek !== null}
-                      className="text-xs text-muted-foreground hover:text-foreground shrink-0 flex items-center gap-1 disabled:opacity-50"
-                    >
-                      {isGenerating ? (
-                        <><Loader2 className="h-3 w-3 animate-spin" /> Generating...</>
-                      ) : (
-                        "Generate"
-                      )}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
     </div>
   );
 }

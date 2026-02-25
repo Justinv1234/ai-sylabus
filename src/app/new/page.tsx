@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Paperclip, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Paperclip, X, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const AUDIENCE_OPTIONS = [
@@ -39,6 +39,15 @@ const ASSESSMENT_OPTIONS = [
   { value: "balanced", label: "Balanced" },
   { value: "assignments", label: "Continuous assignments" },
 ];
+
+const DEFAULTS = {
+  audience: "undergraduate",
+  duration: "16",
+  frequency: "2x",
+  goal: "",
+  teaching: "mixed",
+  assessment: "balanced",
+};
 
 // Steps 0–6 are questions, step 7 is materials (optional), step 8 is summary
 const TOTAL_STEPS = 7;
@@ -81,9 +90,15 @@ export default function NewCoursePage() {
   }
 
   function handleFinish() {
-    const finalDuration = customWeeks || duration;
+    const finalDuration = customWeeks || duration || DEFAULTS.duration;
     const params = new URLSearchParams({
-      topic, audience, duration: finalDuration, frequency, goal, teaching, assessment,
+      topic,
+      audience: audience || DEFAULTS.audience,
+      duration: finalDuration,
+      frequency: frequency || DEFAULTS.frequency,
+      goal: goal || DEFAULTS.goal,
+      teaching: teaching || DEFAULTS.teaching,
+      assessment: assessment || DEFAULTS.assessment,
       ...(materialFile ? { material: materialFile.name } : {}),
       ...(courseCode ? { courseCode } : {}),
       ...(prerequisites ? { prerequisites } : {}),
@@ -102,6 +117,18 @@ export default function NewCoursePage() {
         : "border-border bg-card text-foreground hover:border-foreground/40 hover:bg-muted"
     }`;
 
+  function SkipButton() {
+    return (
+      <button
+        onClick={advance}
+        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mt-4"
+      >
+        <SkipForward className="h-3.5 w-3.5" />
+        Skip
+      </button>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-background flex flex-col px-4">
       {/* Progress bar */}
@@ -117,7 +144,7 @@ export default function NewCoursePage() {
         <div className="max-w-xl w-full">
           <div key={animKey} className={animClass}>
 
-            {/* Step 0 — Course title */}
+            {/* Step 0 — Course title (required, no skip) */}
             {step === 0 && (
               <div className="space-y-7">
                 <div className="space-y-1">
@@ -153,6 +180,7 @@ export default function NewCoursePage() {
                     </button>
                   ))}
                 </div>
+                <SkipButton />
               </div>
             )}
 
@@ -187,6 +215,7 @@ export default function NewCoursePage() {
                 {customWeeks && parseInt(customWeeks) > 0 && parseInt(customWeeks) < 20 && (
                   <Button onClick={advance} className="rounded-xl h-11 px-6">Continue <ArrowRight className="h-4 w-4 ml-1" /></Button>
                 )}
+                <SkipButton />
               </div>
             )}
 
@@ -204,6 +233,7 @@ export default function NewCoursePage() {
                     </button>
                   ))}
                 </div>
+                <SkipButton />
               </div>
             )}
 
@@ -223,9 +253,12 @@ export default function NewCoursePage() {
                   rows={5}
                   className="w-full rounded-xl border border-border bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-foreground/20 transition"
                 />
-                <Button onClick={advance} disabled={goal.trim().length === 0} className="rounded-xl h-11 px-6">
-                  Continue <ArrowRight className="h-4 w-4 ml-1" />
-                </Button>
+                <div className="flex items-center gap-4">
+                  <Button onClick={advance} disabled={goal.trim().length === 0} className="rounded-xl h-11 px-6">
+                    Continue <ArrowRight className="h-4 w-4 ml-1" />
+                  </Button>
+                  <SkipButton />
+                </div>
               </div>
             )}
 
@@ -248,6 +281,7 @@ export default function NewCoursePage() {
                     </button>
                   ))}
                 </div>
+                <SkipButton />
               </div>
             )}
 
@@ -265,6 +299,7 @@ export default function NewCoursePage() {
                     </button>
                   ))}
                 </div>
+                <SkipButton />
               </div>
             )}
 
@@ -349,12 +384,12 @@ export default function NewCoursePage() {
                 <div className="space-y-3 rounded-xl border border-border bg-card p-5">
                   {[
                     { label: "Course", value: topic },
-                    { label: "Audience", value: AUDIENCE_OPTIONS.find((o) => o.value === audience)?.label },
-                    { label: "Duration", value: DURATION_OPTIONS.find((o) => o.value === duration)?.label ?? `${duration} Weeks` },
-                    { label: "Frequency", value: FREQUENCY_OPTIONS.find((o) => o.value === frequency)?.label },
-                    { label: "Objectives", value: goal },
-                    { label: "Teaching style", value: TEACHING_OPTIONS.find((o) => o.value === teaching)?.label },
-                    { label: "Assessment", value: ASSESSMENT_OPTIONS.find((o) => o.value === assessment)?.label },
+                    { label: "Audience", value: AUDIENCE_OPTIONS.find((o) => o.value === audience)?.label || AUDIENCE_OPTIONS.find((o) => o.value === DEFAULTS.audience)?.label },
+                    { label: "Duration", value: DURATION_OPTIONS.find((o) => o.value === (duration || DEFAULTS.duration))?.label ?? `${duration || DEFAULTS.duration} Weeks` },
+                    { label: "Frequency", value: FREQUENCY_OPTIONS.find((o) => o.value === (frequency || DEFAULTS.frequency))?.label },
+                    { label: "Objectives", value: goal || "AI will generate based on topic" },
+                    { label: "Teaching style", value: TEACHING_OPTIONS.find((o) => o.value === (teaching || DEFAULTS.teaching))?.label },
+                    { label: "Assessment", value: ASSESSMENT_OPTIONS.find((o) => o.value === (assessment || DEFAULTS.assessment))?.label },
                     ...(materialFile ? [{ label: "Materials", value: materialFile.name }] : []),
                     ...(courseCode ? [{ label: "Course code", value: courseCode }] : []),
                     ...(prerequisites ? [{ label: "Prerequisites", value: prerequisites }] : []),
