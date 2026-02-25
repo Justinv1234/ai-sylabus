@@ -1,0 +1,46 @@
+name: Deploy to AWS Lambda
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
+            docker login --username AWS --password-stdin \
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+      - name: Build Docker image
+        run: docker build --platform linux/amd64 -t ai-sylabus .
+
+      - name: Tag and push to ECR
+        run: |
+          ECR_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/ai-sylabus
+          docker tag ai-sylabus:latest ${ECR_URI}:latest
+          docker tag ai-sylabus:latest ${ECR_URI}:${{ github.sha }}
+          docker push ${ECR_URI}:latest
+          docker push ${ECR_URI}:${{ github.sha }}
+
+      - name: Update Lambda function
+        run: |
+          ECR_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/ai-sylabus
+          aws lambda update-function-code \
+            --function-name ai-sylabus \
+            --image-uri ${ECR_URI}:latest
+          aws lambda wait function-updated-v2 \
+            --function-name ai-sylabus

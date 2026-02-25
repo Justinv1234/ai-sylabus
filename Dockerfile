@@ -12,15 +12,15 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-ARG AWS_BEARER_TOKEN_BEDROCK
-ENV AWS_BEARER_TOKEN_BEDROCK=$AWS_BEARER_TOKEN_BEDROCK
-
 RUN npm run build
 
 # Production image
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+
+# Lambda Web Adapter
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.0.0-rc1 /lambda-adapter /opt/extensions/lambda-adapter
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
