@@ -22,6 +22,9 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
+# AWS Lambda Web Adapter — wraps the HTTP server for Lambda compatibility
+COPY --from=public.ecr.aws/awsguru/aws-lambda-web-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
@@ -33,5 +36,6 @@ USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV AWS_LWA_PORT=3000
 
 CMD ["node", "server.js"]
