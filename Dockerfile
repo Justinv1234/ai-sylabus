@@ -23,7 +23,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # AWS Lambda Web Adapter — wraps the HTTP server for Lambda compatibility
-COPY --from=public.ecr.aws/awsguru/aws-lambda-web-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.0 /lambda-adapter /opt/extensions/lambda-adapter
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
