@@ -47,6 +47,10 @@ export default function Home() {
             </div>
           </Link>
         </div>
+
+        <Link href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          View saved syllabi &rarr;
+        </Link>
       </div>
     </main>
   );

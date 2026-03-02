@@ -1,17 +1,6 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { ReactNode } from "react";
-
-export type SyllabusData = {
-  courseTitle: string;
-  courseCode?: string;
-  courseDescription: string;
-  learningObjectives: string[];
-  prerequisites?: string;
-  requiredMaterials: string[];
-  gradingBreakdown: { component: string; weight: string; description: string }[];
-  weeklySchedule: { week: number; topic: string; subtopics: string[]; assignments: string }[];
-  policies: { attendance: string; lateWork: string; academicIntegrity: string };
-};
+import type { Syllabus } from "@/lib/types";
 
 const s = StyleSheet.create({
   page: {
@@ -129,7 +118,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export function SyllabusPDF({ data }: { data: SyllabusData }) {
+export function SyllabusPDF({ data }: { data: Syllabus }) {
   return (
     <Document>
       <Page size="A4" style={s.page}>

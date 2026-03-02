@@ -15,7 +15,7 @@ const AUDIENCE_OPTIONS = [
 const DURATION_OPTIONS = [
   { value: "4", label: "4 Weeks" },
   { value: "8", label: "8 Weeks" },
-  { value: "16", label: "16 Weeks" },
+  { value: "14", label: "14 Weeks" },
 ];
 
 const FREQUENCY_OPTIONS = [

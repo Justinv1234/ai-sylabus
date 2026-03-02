@@ -3,31 +3,10 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Download, Loader2, X, Plus } from "lucide-react";
-
-type GradingItem = { component: string; weight: string; description: string };
-type WeekItem = { week: number; topic: string; subtopics: string[]; assignments: string };
-type Policies = { attendance: string; lateWork: string; academicIntegrity: string };
-type Syllabus = {
-  courseTitle: string;
-  courseCode?: string;
-  courseDescription: string;
-  learningObjectives: string[];
-  prerequisites?: string;
-  requiredMaterials: string[];
-  gradingBreakdown: GradingItem[];
-  weeklySchedule: WeekItem[];
-  policies: Policies;
-};
-
-// Shared class for inline editable inputs / textareas
-const inputCls = "bg-transparent focus:outline-none focus:bg-muted rounded px-1 w-full";
-
-// Auto-resize textarea handler — call from onChange and onFocus
-function autoResize(e: React.ChangeEvent<HTMLTextAreaElement> | React.FocusEvent<HTMLTextAreaElement>) {
-  e.target.style.height = "auto";
-  e.target.style.height = e.target.scrollHeight + "px";
-}
+import { ArrowLeft, Download, Loader2, Check } from "lucide-react";
+import { saveSyllabus } from "@/lib/storage";
+import { SyllabusEditor } from "@/components/SyllabusEditor";
+import type { Syllabus } from "@/lib/types";
 
 function BuildContent() {
   const params = useSearchParams();
@@ -63,23 +42,6 @@ function BuildContent() {
       .catch(() => setError("Something went wrong. Please try again."));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── List helpers ──────────────────────────────────────────────────────────
-
-  function setObjectives(fn: (prev: string[]) => string[]) {
-    setData((d) => d ? { ...d, learningObjectives: fn(d.learningObjectives) } : d);
-  }
-  function setMaterials(fn: (prev: string[]) => string[]) {
-    setData((d) => d ? { ...d, requiredMaterials: fn(d.requiredMaterials) } : d);
-  }
-  function setGrading(fn: (prev: GradingItem[]) => GradingItem[]) {
-    setData((d) => d ? { ...d, gradingBreakdown: fn(d.gradingBreakdown) } : d);
-  }
-  function setSchedule(fn: (prev: WeekItem[]) => WeekItem[]) {
-    setData((d) => d ? { ...d, weeklySchedule: fn(d.weeklySchedule) } : d);
-  }
-
-  // ── PDF download ──────────────────────────────────────────────────────────
-
   async function downloadPDF() {
     if (!data || isDownloading) return;
     setIsDownloading(true);
@@ -104,7 +66,22 @@ function BuildContent() {
     }
   }
 
-  // ── States ────────────────────────────────────────────────────────────────
+  function handleDone() {
+    if (!data) return;
+    const wizardParams = {
+      topic: params.get("topic") ?? "",
+      audience: params.get("audience") ?? "",
+      duration: params.get("duration") ?? "",
+      frequency: params.get("frequency") ?? "",
+      goal: params.get("goal") ?? "",
+      teaching: params.get("teaching") ?? "",
+      assessment: params.get("assessment") ?? "",
+      courseCode: params.get("courseCode") || undefined,
+      prerequisites: params.get("prerequisites") || undefined,
+    };
+    const saved = saveSyllabus(data, wizardParams);
+    router.push(`/dashboard/${saved.id}`);
+  }
 
   if (error) {
     return (
@@ -137,316 +114,25 @@ function BuildContent() {
           <ArrowLeft className="h-4 w-4" /> Back
         </Button>
         <p className="text-xs text-muted-foreground">Click any text to edit</p>
-        <Button size="sm" onClick={downloadPDF} disabled={isDownloading} className="gap-1.5">
-          {isDownloading ? (
-            <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
-          ) : (
-            <><Download className="h-4 w-4" /> Download PDF</>
-          )}
-        </Button>
-      </div>
-
-      {/* Syllabus document */}
-      <div className="syllabus-doc max-w-3xl mx-auto px-8 py-12 space-y-8">
-
-        {/* Header */}
-        <div className="text-center space-y-1 pb-6 border-b-2 border-foreground">
-          <h1
-            contentEditable
-            suppressContentEditableWarning
-            className="text-3xl font-bold text-foreground focus:outline-none focus:bg-muted rounded px-1"
-          >
-            {data.courseTitle}
-          </h1>
-          {data.courseCode && (
-            <p
-              contentEditable
-              suppressContentEditableWarning
-              className="text-muted-foreground focus:outline-none focus:bg-muted rounded px-1"
-            >
-              {data.courseCode}
-            </p>
-          )}
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={downloadPDF} disabled={isDownloading} className="gap-1.5">
+            {isDownloading ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
+            ) : (
+              <><Download className="h-4 w-4" /> Download PDF</>
+            )}
+          </Button>
+          <Button size="sm" onClick={handleDone} className="gap-1.5">
+            <Check className="h-4 w-4" /> Done
+          </Button>
         </div>
-
-        {/* Course Description */}
-        <Section title="Course Description">
-          <p
-            contentEditable
-            suppressContentEditableWarning
-            className="text-sm leading-relaxed whitespace-pre-wrap focus:outline-none focus:bg-muted rounded px-1"
-          >
-            {data.courseDescription}
-          </p>
-        </Section>
-
-        {/* Prerequisites — only if professor provided */}
-        {data.prerequisites && (
-          <Section title="Prerequisites">
-            <p
-              contentEditable
-              suppressContentEditableWarning
-              className="text-sm focus:outline-none focus:bg-muted rounded px-1"
-            >
-              {data.prerequisites}
-            </p>
-          </Section>
-        )}
-
-        {/* Learning Objectives */}
-        <Section title="Learning Objectives">
-          <p className="text-sm text-muted-foreground mb-2">By the end of this course, students will be able to:</p>
-          <ul className="space-y-1.5">
-            {data.learningObjectives.map((obj, i) => (
-              <li key={i} className="group flex gap-2 items-start">
-                <span className="text-muted-foreground shrink-0 text-sm mt-0.5">•</span>
-                <textarea
-                  value={obj}
-                  rows={1}
-                  onChange={(e) => {
-                    setObjectives((prev) => {
-                      const a = [...prev]; a[i] = e.target.value; return a;
-                    });
-                    e.target.style.height = "auto";
-                    e.target.style.height = e.target.scrollHeight + "px";
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.height = "auto";
-                    e.target.style.height = e.target.scrollHeight + "px";
-                  }}
-                  className={`${inputCls} text-sm resize-none overflow-hidden leading-normal`}
-                  placeholder="Add objective..."
-                />
-                <button
-                  onClick={() => setObjectives((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="print:hidden opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0 mt-0.5"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-          <button
-            onClick={() => setObjectives((prev) => [...prev, ""])}
-            className="print:hidden mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Plus className="h-3 w-3" /> Add objective
-          </button>
-        </Section>
-
-        {/* Required Materials */}
-        <Section title="Required Materials">
-          <ul className="space-y-1.5">
-            {data.requiredMaterials.map((m, i) => (
-              <li key={i} className="group flex gap-2 items-start">
-                <span className="text-muted-foreground shrink-0 text-sm mt-0.5">•</span>
-                <textarea
-                  value={m}
-                  rows={1}
-                  onChange={(e) => {
-                    setMaterials((prev) => {
-                      const a = [...prev]; a[i] = e.target.value; return a;
-                    });
-                    e.target.style.height = "auto";
-                    e.target.style.height = e.target.scrollHeight + "px";
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.height = "auto";
-                    e.target.style.height = e.target.scrollHeight + "px";
-                  }}
-                  className={`${inputCls} text-sm resize-none overflow-hidden leading-normal`}
-                  placeholder="Add material..."
-                />
-                <button
-                  onClick={() => setMaterials((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="print:hidden opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-          <button
-            onClick={() => setMaterials((prev) => [...prev, ""])}
-            className="print:hidden mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Plus className="h-3 w-3" /> Add material
-          </button>
-        </Section>
-
-        {/* Grading Breakdown */}
-        <Section title="Grading Breakdown">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left pb-2 pr-4 font-medium text-muted-foreground w-1/4">Component</th>
-                <th className="text-left pb-2 pr-4 font-medium text-muted-foreground w-16">Weight</th>
-                <th className="text-left pb-2 font-medium text-muted-foreground">Description</th>
-                <th className="print:hidden w-6" />
-              </tr>
-            </thead>
-            <tbody>
-              {data.gradingBreakdown.map((row, i) => (
-                <tr key={i} className="group border-b border-border last:border-0">
-                  <td className="py-1.5 pr-4 align-top">
-                    <textarea
-                      value={row.component}
-                      rows={1}
-                      onChange={(e) => { setGrading((prev) => { const a = [...prev]; a[i] = { ...a[i], component: e.target.value }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} font-medium resize-none overflow-hidden leading-normal`}
-                      placeholder="Component"
-                    />
-                  </td>
-                  <td className="py-1.5 pr-4 align-top">
-                    <textarea
-                      value={row.weight}
-                      rows={1}
-                      onChange={(e) => { setGrading((prev) => { const a = [...prev]; a[i] = { ...a[i], weight: e.target.value }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} resize-none overflow-hidden leading-normal`}
-                      placeholder="0%"
-                    />
-                  </td>
-                  <td className="py-1.5 align-top">
-                    <textarea
-                      value={row.description}
-                      rows={1}
-                      onChange={(e) => { setGrading((prev) => { const a = [...prev]; a[i] = { ...a[i], description: e.target.value }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} text-muted-foreground resize-none overflow-hidden leading-normal`}
-                      placeholder="Description"
-                    />
-                  </td>
-                  <td className="print:hidden py-1.5 pl-2">
-                    <button
-                      onClick={() => setGrading((prev) => prev.filter((_, idx) => idx !== i))}
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <button
-            onClick={() => setGrading((prev) => [...prev, { component: "", weight: "", description: "" }])}
-            className="print:hidden mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Plus className="h-3 w-3" /> Add row
-          </button>
-        </Section>
-
-        {/* Weekly Schedule */}
-        <Section title="Course Schedule">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left pb-2 pr-3 font-medium text-muted-foreground w-14">Week</th>
-                <th className="text-left pb-2 pr-3 font-medium text-muted-foreground w-1/3">Topic</th>
-                <th className="text-left pb-2 font-medium text-muted-foreground">Subtopics &amp; Assignments</th>
-                <th className="print:hidden w-6" />
-              </tr>
-            </thead>
-            <tbody>
-              {data.weeklySchedule.map((row, i) => (
-                <tr key={i} className="group border-b border-border last:border-0 align-top">
-                  <td className="py-2 pr-3 text-muted-foreground">{row.week}</td>
-                  <td className="py-2 pr-3">
-                    <textarea
-                      value={row.topic}
-                      rows={1}
-                      onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], topic: e.target.value }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} font-medium resize-none overflow-hidden leading-normal`}
-                      placeholder="Topic"
-                    />
-                  </td>
-                  <td className="py-2">
-                    <textarea
-                      value={row.subtopics.join(", ")}
-                      rows={1}
-                      onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], subtopics: e.target.value.split(", ").filter(Boolean) }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} resize-none overflow-hidden leading-normal`}
-                      placeholder="Subtopics (comma-separated)..."
-                    />
-                    <textarea
-                      value={row.assignments}
-                      rows={1}
-                      onChange={(e) => { setSchedule((prev) => { const a = [...prev]; a[i] = { ...a[i], assignments: e.target.value }; return a; }); autoResize(e); }}
-                      onFocus={autoResize}
-                      className={`${inputCls} text-muted-foreground text-xs italic mt-0.5 resize-none overflow-hidden leading-normal`}
-                      placeholder="Assignments..."
-                    />
-                  </td>
-                  <td className="print:hidden py-2 pl-2 pt-3">
-                    <button
-                      onClick={() =>
-                        setSchedule((prev) =>
-                          prev.filter((_, idx) => idx !== i).map((w, idx) => ({ ...w, week: idx + 1 }))
-                        )
-                      }
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <button
-            onClick={() =>
-              setSchedule((prev) => [
-                ...prev,
-                { week: prev.length + 1, topic: "", subtopics: [], assignments: "" },
-              ])
-            }
-            className="print:hidden mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Plus className="h-3 w-3" /> Add week
-          </button>
-        </Section>
-
-        {/* Policies */}
-        <Section title="Course Policies">
-          <div className="space-y-4">
-            {(
-              [
-                { label: "Attendance", key: "attendance" },
-                { label: "Late Work", key: "lateWork" },
-                { label: "Academic Integrity", key: "academicIntegrity" },
-              ] as { label: string; key: keyof Policies }[]
-            ).map(({ label, key }) => (
-              <div key={key}>
-                <p className="text-sm font-semibold text-foreground mb-1">{label}</p>
-                <p
-                  contentEditable
-                  suppressContentEditableWarning
-                  className="text-sm text-muted-foreground leading-relaxed focus:outline-none focus:bg-muted rounded px-1"
-                >
-                  {data.policies[key]}
-                </p>
-              </div>
-            ))}
-          </div>
-        </Section>
-
       </div>
-    </>
-  );
-}
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-3">
-      <h2 className="text-base font-bold text-foreground uppercase tracking-wide border-b border-border pb-1">
-        {title}
-      </h2>
-      {children}
-    </div>
+      <SyllabusEditor
+        data={data}
+        onChange={(fn) => setData((d) => d ? fn(d) : d)}
+      />
+    </>
   );
 }
 
