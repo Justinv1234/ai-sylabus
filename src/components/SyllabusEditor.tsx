@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Loader2, X, Plus, MessageCircle, Send, Bot } from "lucide-react";
-import type { Syllabus, GradingItem, WeekItem, Policies } from "@/lib/types";
+import type { Syllabus, GradingItem, WeekItem, Policies, SyllabusSection } from "@/lib/types";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -67,6 +67,9 @@ export function SyllabusEditor({
   }
   function setSchedule(fn: (prev: WeekItem[]) => WeekItem[]) {
     onChange((d) => ({ ...d, weeklySchedule: fn(d.weeklySchedule) }));
+  }
+  function setAdditionalSections(fn: (prev: SyllabusSection[]) => SyllabusSection[]) {
+    onChange((d) => ({ ...d, additionalSections: fn(d.additionalSections ?? []) }));
   }
 
   // ── AI chat ─────────────────────────────────────────────────────────────
@@ -280,6 +283,137 @@ export function SyllabusEditor({
             <Plus className="h-3 w-3" /> Add week
           </button>
         </Section>
+
+        {/* Additional Sections (from parsed PDF) */}
+        {data.additionalSections?.map((section, si) => (
+          <Section key={si} title={section.title}>
+            {section.type === "text" && (
+              <textarea
+                value={section.content ?? ""}
+                rows={2}
+                onChange={(e) => {
+                  setAdditionalSections((prev) => {
+                    const a = [...prev]; a[si] = { ...a[si], content: e.target.value }; return a;
+                  });
+                  autoResize(e);
+                }}
+                onFocus={autoResize}
+                className={`${inputCls} text-sm leading-relaxed resize-none overflow-hidden`}
+              />
+            )}
+            {section.type === "list" && (
+              <>
+                <ul className="space-y-1.5">
+                  {(section.items ?? []).map((item, ii) => (
+                    <li key={ii} className="group flex gap-2 items-start">
+                      <span className="text-muted-foreground shrink-0 text-sm mt-0.5">•</span>
+                      <textarea
+                        value={item}
+                        rows={1}
+                        onChange={(e) => {
+                          setAdditionalSections((prev) => {
+                            const a = [...prev];
+                            const items = [...(a[si].items ?? [])];
+                            items[ii] = e.target.value;
+                            a[si] = { ...a[si], items };
+                            return a;
+                          });
+                          autoResize(e);
+                        }}
+                        onFocus={autoResize}
+                        className={`${inputCls} text-sm resize-none overflow-hidden leading-normal`}
+                      />
+                      <button
+                        onClick={() => setAdditionalSections((prev) => {
+                          const a = [...prev];
+                          a[si] = { ...a[si], items: (a[si].items ?? []).filter((_, idx) => idx !== ii) };
+                          return a;
+                        })}
+                        className="print:hidden opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0 mt-0.5"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  onClick={() => setAdditionalSections((prev) => {
+                    const a = [...prev];
+                    a[si] = { ...a[si], items: [...(a[si].items ?? []), ""] };
+                    return a;
+                  })}
+                  className="print:hidden mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Plus className="h-3 w-3" /> Add item
+                </button>
+              </>
+            )}
+            {section.type === "table" && (
+              <>
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border">
+                      {(section.columns ?? []).map((col, ci) => (
+                        <th key={ci} className="text-left pb-2 pr-4 font-medium text-muted-foreground">{col}</th>
+                      ))}
+                      <th className="print:hidden w-6" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(section.rows ?? []).map((row, ri) => (
+                      <tr key={ri} className="group border-b border-border last:border-0">
+                        {(section.columns ?? []).map((col, ci) => (
+                          <td key={ci} className="py-1.5 pr-4 align-top">
+                            <textarea
+                              value={row[col] ?? ""}
+                              rows={1}
+                              onChange={(e) => {
+                                setAdditionalSections((prev) => {
+                                  const a = [...prev];
+                                  const rows = [...(a[si].rows ?? [])];
+                                  rows[ri] = { ...rows[ri], [col]: e.target.value };
+                                  a[si] = { ...a[si], rows };
+                                  return a;
+                                });
+                                autoResize(e);
+                              }}
+                              onFocus={autoResize}
+                              className={`${inputCls} resize-none overflow-hidden leading-normal`}
+                            />
+                          </td>
+                        ))}
+                        <td className="print:hidden py-1.5 pl-2">
+                          <button
+                            onClick={() => setAdditionalSections((prev) => {
+                              const a = [...prev];
+                              a[si] = { ...a[si], rows: (a[si].rows ?? []).filter((_, idx) => idx !== ri) };
+                              return a;
+                            })}
+                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <button
+                  onClick={() => setAdditionalSections((prev) => {
+                    const a = [...prev];
+                    const emptyRow: Record<string, string> = {};
+                    (a[si].columns ?? []).forEach((col) => { emptyRow[col] = ""; });
+                    a[si] = { ...a[si], rows: [...(a[si].rows ?? []), emptyRow] };
+                    return a;
+                  })}
+                  className="print:hidden mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Plus className="h-3 w-3" /> Add row
+                </button>
+              </>
+            )}
+          </Section>
+        ))}
 
         {/* Policies */}
         <Section title="Course Policies">

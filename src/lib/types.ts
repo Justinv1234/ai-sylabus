@@ -2,6 +2,15 @@ export type GradingItem = { component: string; weight: string; description: stri
 export type WeekItem = { week: number; topic: string; subtopics: string[]; assignments: string };
 export type Policies = { attendance: string; lateWork: string; academicIntegrity: string };
 
+export type SyllabusSection = {
+  title: string;
+  type: "list" | "text" | "table";
+  items?: string[];
+  content?: string;
+  columns?: string[];
+  rows?: Record<string, string>[];
+};
+
 export type Syllabus = {
   courseTitle: string;
   courseCode?: string;
@@ -12,6 +21,7 @@ export type Syllabus = {
   gradingBreakdown: GradingItem[];
   weeklySchedule: WeekItem[];
   policies: Policies;
+  additionalSections?: SyllabusSection[];
 };
 
 export type HomeworkQuestion = {

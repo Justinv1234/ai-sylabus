@@ -203,6 +203,37 @@ export function SyllabusPDF({ data }: { data: Syllabus }) {
           ))}
         </Section>
 
+        {/* Additional Sections */}
+        {data.additionalSections?.map((section, si) => (
+          <Section key={si} title={section.title}>
+            {section.type === "text" && (
+              <Text style={s.body}>{section.content}</Text>
+            )}
+            {section.type === "list" && (section.items ?? []).map((item, ii) => (
+              <View key={ii} style={s.bulletRow}>
+                <Text style={[s.bulletDot, s.muted]}>•</Text>
+                <Text style={s.body}>{item}</Text>
+              </View>
+            ))}
+            {section.type === "table" && (
+              <>
+                <View style={s.tableHeaderRow}>
+                  {(section.columns ?? []).map((col, ci) => (
+                    <View key={ci} style={{ flex: 1 }}><Text style={s.colHeader}>{col}</Text></View>
+                  ))}
+                </View>
+                {(section.rows ?? []).map((row, ri) => (
+                  <View key={ri} style={s.tableRow}>
+                    {(section.columns ?? []).map((col, ci) => (
+                      <View key={ci} style={{ flex: 1 }}><Text style={s.body}>{row[col] ?? ""}</Text></View>
+                    ))}
+                  </View>
+                ))}
+              </>
+            )}
+          </Section>
+        ))}
+
         {/* Policies */}
         <Section title="Course Policies">
           {[
